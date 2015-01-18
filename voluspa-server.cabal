@@ -58,7 +58,9 @@ executable voluspa-server
   
   -- Other library packages from which modules are imported.
   build-depends:       base >=4.7 && <4.8,
-                       websockets
+                       websockets,
+                       text
+
     
   
   -- Directories containing source files.
