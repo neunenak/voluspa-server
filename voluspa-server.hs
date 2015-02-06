@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import Control.Applicative
+import Control.Concurrent (MVar, newMVar, modifyMVar_, modifyMVar, readMVar)
 import Control.Monad
 import Data.Aeson
 import Data.Aeson.Types
@@ -22,6 +23,9 @@ type GameId = String
 
 data Action = 
   Action { action :: !T.Text } deriving Show
+
+newServerState :: ServerState
+newServerState = ServerState Data.HashMap.Lazy.empty Data.HashMap.Lazy.empty Nothing
 
 instance FromJSON Action where
   parseJSON (Object v) =
@@ -45,9 +49,12 @@ decodeAction msg =
 port :: Int
 port = 22000
 
-application :: WS.PendingConnection -> IO ()
-application pend = do
+application :: MVar ServerState -> WS.PendingConnection -> IO ()
+application state pend = do
   conn <- WS.acceptRequest pend
   echo conn
 
-main = WS.runServer "0.0.0.0" port application
+main :: IO ()
+main = do
+  state <- newMVar newServerState
+  WS.runServer "0.0.0.0" port $ application state
