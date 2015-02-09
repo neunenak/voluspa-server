@@ -62,6 +62,7 @@ executable voluspa-server
                        containers,
                        unordered-containers,
                        text,
+                       transformers,
                        websockets,
                        aeson >=0.7 && <0.8
   
