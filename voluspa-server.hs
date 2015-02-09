@@ -11,6 +11,7 @@ import Data.HashMap.Lazy
 import Data.Maybe (isJust)
 import qualified Data.Text as T
 import qualified Network.WebSockets as WS
+import System.Random
 
 data ServerState = ServerState ClientsMap GamesMap WaitingClient deriving Show
 
@@ -48,16 +49,13 @@ decodeAction msg =
       Left err -> Action {action = "NoAction"}
       Right action -> action
 
-addWaitingClient :: WS.Connection -> ServerState -> ServerState
-addWaitingClient conn (ServerState clients games waitingClient) = 
-  let clientId = "testId"
-  in
-    ServerState (insert clientId conn clients) games (Just clientId)
+addWaitingClient :: WS.Connection -> ClientId -> ServerState -> ServerState
+addWaitingClient conn clientId (ServerState clients games waitingClient) = 
+  ServerState (insert clientId conn clients) games (Just clientId)
 
-matchClients :: WS.Connection -> ServerState -> ServerState
-matchClients conn (ServerState clients games (Just waitingClientId)) = 
-  let clientId = "testId2"
-      gameId = "testGameId"
+matchClients :: WS.Connection -> ClientId -> ServerState -> ServerState
+matchClients conn clientId (ServerState clients games (Just waitingClientId)) = 
+  let gameId = clientId ++ waitingClientId
   in
     ServerState (insert clientId conn clients) (insert gameId (Game clientId waitingClientId) games) Nothing
 
@@ -74,15 +72,17 @@ application state pending = do
 
   ServerState clients games waitingClient <- liftIO $ readMVar state
 
+  clientId <- randomRIO (1, 100000000) :: IO Int    -- TODO: should be a random string, so we don't have to (show clientId) everywhere
+
   if isJust waitingClient
   then
     liftIO $ modifyMVar_ state $ \s -> do 
-      let s' = matchClients conn s
+      let s' = matchClients conn (show clientId) s
       putStrLn $ show s'
       return s'
   else
     liftIO $ modifyMVar_ state $ \s -> do 
-      let s' = addWaitingClient conn s
+      let s' = addWaitingClient conn (show clientId) s
       putStrLn $ show s'
       return s'
   response conn state

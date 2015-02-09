@@ -61,6 +61,7 @@ executable voluspa-server
                        bytestring,
                        containers,
                        unordered-containers,
+                       random,
                        text,
                        transformers,
                        websockets,
