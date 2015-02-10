@@ -8,7 +8,8 @@ import Data.Aeson
 import Data.Aeson.Types
 import Data.ByteString.Lazy.Internal
 import Data.HashMap.Lazy
-import Data.Maybe (isJust)
+import qualified Data.HashMap.Lazy as HM
+import Data.Maybe (isJust, fromJust)
 import qualified Data.Text as T
 import qualified Network.WebSockets as WS
 import System.Random
@@ -59,11 +60,27 @@ matchClients conn clientId (ServerState clients games (Just waitingClientId)) =
   in
     ServerState (insert clientId conn clients) (insert gameId (Game clientId waitingClientId) games) Nothing
 
-response :: WS.Connection -> MVar ServerState -> IO ()
-response conn state = forever $ do
+findMatchingConnection :: WS.Connection -> ClientId -> ServerState -> Maybe WS.Connection
+findMatchingConnection conn clientId (ServerState clients games waitingClient) =
+  let matchingGames = HM.filter (\(Game cId1 cId2) -> cId1 == clientId || cId2 == clientId) games
+      game = if HM.null matchingGames 
+             then Nothing
+             else Just ((snd . head . toList) matchingGames)
+      otherClientId = liftM (\(Game cId1 cId2) -> if cId1 == clientId then cId2 else cId1) game
+  in liftM (\cId -> clients ! cId) otherClientId
+
+response :: WS.Connection -> ClientId -> MVar ServerState -> IO ()
+response conn clientId state = forever $ do
   msg <- WS.receiveData conn
   -- WS.sendTextData conn ((action (decodeAction msg)) :: T.Text)
-  WS.sendTextData conn (msg :: T.Text)
+
+  -- if action is "StartGame", do the start game stuff that's currently in application
+  -- otherwise, do the below
+
+  currentState <- readMVar state
+  let maybeOpponentConn = findMatchingConnection conn clientId currentState
+
+  when (isJust maybeOpponentConn) $ WS.sendTextData (fromJust maybeOpponentConn) (msg :: T.Text)
 
 application :: MVar ServerState -> WS.PendingConnection -> IO ()
 application state pending = do
@@ -72,20 +89,22 @@ application state pending = do
 
   ServerState clients games waitingClient <- liftIO $ readMVar state
 
-  clientId <- randomRIO (1, 100000000) :: IO Int    -- TODO: should be a random string, so we don't have to (show clientId) everywhere
+  clientIdInt <- randomRIO (1, 100000000) :: IO Int
+  let clientId = show clientIdInt
 
   if isJust waitingClient
   then
     liftIO $ modifyMVar_ state $ \s -> do 
-      let s' = matchClients conn (show clientId) s
+      let s' = matchClients conn clientId s
       putStrLn $ show s'
       return s'
+    -- send a GameStarted message to both clients with the state that was in the client message
   else
     liftIO $ modifyMVar_ state $ \s -> do 
-      let s' = addWaitingClient conn (show clientId) s
+      let s' = addWaitingClient conn clientId s
       putStrLn $ show s'
       return s'
-  response conn state
+  response conn clientId state
 
 main :: IO ()
 main = do
