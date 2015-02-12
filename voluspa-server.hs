@@ -17,13 +17,10 @@ import System.Random
 data ServerState = ServerState ClientsMap GamesMap WaitingClient deriving Show
 
 type ClientsMap = HashMap ClientId WS.Connection
-type GamesMap = HashMap GameId Game
+type GamesMap = HashMap ClientId ClientId   -- map of player to opponent (two entries per matchup). Maybe GamesMap is the wrong name for this?
 type WaitingClient = Maybe ClientId
 
-data Game = Game ClientId ClientId deriving Show
-
 type ClientId = String
-type GameId = String
 
 data Action = 
   Action { action :: !T.Text }
@@ -32,7 +29,7 @@ instance Show WS.Connection where
   show conn = "<Connection>"
 
 newServerState :: ServerState
-newServerState = ServerState Data.HashMap.Lazy.empty Data.HashMap.Lazy.empty Nothing
+newServerState = ServerState HM.empty HM.empty Nothing
 
 port :: Int
 port = 22000
@@ -56,17 +53,13 @@ addWaitingClient conn clientId (ServerState clients games waitingClient) =
 
 matchClients :: WS.Connection -> ClientId -> ServerState -> ServerState
 matchClients conn clientId (ServerState clients games (Just waitingClientId)) = 
-  let gameId = clientId ++ waitingClientId
+  let newGames = (insert waitingClientId clientId (insert clientId waitingClientId games))
   in
-    ServerState (insert clientId conn clients) (insert gameId (Game clientId waitingClientId) games) Nothing
+    ServerState (insert clientId conn clients) newGames Nothing
 
 findMatchingConnection :: WS.Connection -> ClientId -> ServerState -> Maybe WS.Connection
 findMatchingConnection conn clientId (ServerState clients games waitingClient) =
-  let matchingGames = HM.filter (\(Game cId1 cId2) -> cId1 == clientId || cId2 == clientId) games
-      game = if HM.null matchingGames 
-             then Nothing
-             else Just ((snd . head . toList) matchingGames)
-      otherClientId = liftM (\(Game cId1 cId2) -> if cId1 == clientId then cId2 else cId1) game
+  let otherClientId = HM.lookup clientId games
   in liftM (\cId -> clients ! cId) otherClientId
 
 response :: WS.Connection -> ClientId -> MVar ServerState -> IO ()
