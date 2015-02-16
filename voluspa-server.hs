@@ -22,8 +22,14 @@ type WaitingClient = Maybe ClientId
 
 type ClientId = Int
 
-data Action = 
-  Action { action :: !T.Text }
+data Message =
+  Message { action :: !T.Text }
+  deriving Show
+
+instance FromJSON Message where
+  parseJSON (Object v) =
+    Message <$> v .: "action"
+  parseJSON _ = mzero
 
 instance Show WS.Connection where
   show conn = "<Connection>"
@@ -34,17 +40,12 @@ newServerState = ServerState HM.empty HM.empty Nothing
 port :: Int
 port = 22000
 
-instance FromJSON Action where
-  parseJSON (Object v) =
-    Action <$> v .: "action"
-  parseJSON _ = mzero
-
-decodeAction :: ByteString -> Action
-decodeAction msg = 
-  let d = eitherDecode msg :: Either String Action
+decodeMessage :: ByteString -> Message
+decodeMessage msg =
+  let d = eitherDecode msg :: Either String Message
   in
     case d of
-      Left err -> Action {action = "NoAction"}
+      Left err -> Message {action = "NoAction"}
       Right action -> action
 
 addWaitingClient :: WS.Connection -> ClientId -> ServerState -> ServerState
@@ -64,11 +65,11 @@ findMatchingConnection clientId (ServerState clients games waitingClient) =
 
 response :: WS.Connection -> ClientId -> MVar ServerState -> IO ()
 response conn clientId mvarState = forever $ do
-  msg <- WS.receiveData conn
+  clientMsg <- WS.receiveData conn
   state <- liftIO $ readMVar mvarState
 
-  let Action action = decodeAction msg
-  putStrLn $ show action
+  let message@(Message action) = decodeMessage clientMsg
+  putStrLn $ show message
 
   case action of
     "StartGame" ->
@@ -91,7 +92,7 @@ response conn clientId mvarState = forever $ do
     _ ->
       let maybeOpponentConn = findMatchingConnection clientId state
       in when (isJust maybeOpponentConn) $ 
-        WS.sendTextData (fromJust maybeOpponentConn) (msg :: ByteString)
+        WS.sendTextData (fromJust maybeOpponentConn) (clientMsg :: ByteString)
 
 application :: MVar ServerState -> WS.PendingConnection -> IO ()
 application state pending = do
