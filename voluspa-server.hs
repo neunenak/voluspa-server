@@ -77,11 +77,11 @@ response conn clientId mvarState = forever $ do
       in case waitingClient of
         Just opponentId -> liftIO $ modifyMVar_ mvarState $ \s -> do
           let newState@(ServerState clientMap _ _) = matchClients conn clientId s
-          let opponentConn = clientMap HM.! opponentId
+          let opponentConn = clientMap ! opponentId
 
-          {- send both clients a game started message. TODO: make a reasonable game start message -}
-          WS.sendTextData conn ("{}" :: T.Text)
-          WS.sendTextData opponentConn ("{}" :: T.Text)
+          WS.sendTextData conn clientMsg
+          WS.sendTextData opponentConn clientMsg
+
           putStrLn $ show newState
           return newState
 
