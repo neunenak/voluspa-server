@@ -71,20 +71,18 @@ response conn clientId state = forever $ do
   putStrLn $ show action
 
   when (action == "StartGame") $
-    if isJust waitingClient
-    then
-      liftIO $ modifyMVar_ state $ \s -> do 
-        let s' = matchClients conn clientId s
+    case waitingClient of
+      Just opponentId -> liftIO $ modifyMVar_ state $ \s -> do
+        let s'@(ServerState clientMap _ _) = matchClients conn clientId s
+        let opponentConn = clientMap HM.! opponentId
 
-        let opponentConn = fromJust $ findMatchingConnection clientId s'
+        {- send both clients a game started message. TODO: make a reasonable game start message -}
         WS.sendTextData conn ("{}" :: T.Text)
         WS.sendTextData opponentConn ("{}" :: T.Text)
-        -- send a GameStarted message to both clients with the state that was in the client message
-        
         putStrLn $ show s'
         return s'
-    else
-      liftIO $ modifyMVar_ state $ \s -> do 
+
+      Nothing -> liftIO $ modifyMVar_ state $ \s -> do
         let s' = addWaitingClient conn clientId s
         putStrLn $ show s'
         return s'
