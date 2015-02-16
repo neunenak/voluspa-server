@@ -63,35 +63,35 @@ findMatchingConnection clientId (ServerState clients games waitingClient) =
   in liftM (\cId -> clients ! cId) otherClientId
 
 response :: WS.Connection -> ClientId -> MVar ServerState -> IO ()
-response conn clientId state = forever $ do
+response conn clientId mvarState = forever $ do
   msg <- WS.receiveData conn
-  ServerState clients games waitingClient <- liftIO $ readMVar state
+  state <- liftIO $ readMVar mvarState
 
   let Action action = decodeAction msg
   putStrLn $ show action
 
-  when (action == "StartGame") $
-    case waitingClient of
-      Just opponentId -> liftIO $ modifyMVar_ state $ \s -> do
-        let s'@(ServerState clientMap _ _) = matchClients conn clientId s
-        let opponentConn = clientMap HM.! opponentId
+  case action of
+    "StartGame" ->
+      let ServerState _ _ waitingClient = state
+      in case waitingClient of
+        Just opponentId -> liftIO $ modifyMVar_ mvarState $ \s -> do
+          let newState@(ServerState clientMap _ _) = matchClients conn clientId s
+          let opponentConn = clientMap HM.! opponentId
 
-        {- send both clients a game started message. TODO: make a reasonable game start message -}
-        WS.sendTextData conn ("{}" :: T.Text)
-        WS.sendTextData opponentConn ("{}" :: T.Text)
-        putStrLn $ show s'
-        return s'
+          {- send both clients a game started message. TODO: make a reasonable game start message -}
+          WS.sendTextData conn ("{}" :: T.Text)
+          WS.sendTextData opponentConn ("{}" :: T.Text)
+          putStrLn $ show newState
+          return newState
 
-      Nothing -> liftIO $ modifyMVar_ state $ \s -> do
-        let s' = addWaitingClient conn clientId s
-        putStrLn $ show s'
-        return s'
-
-  currentState <- readMVar state
-  let maybeOpponentConn = findMatchingConnection clientId currentState
-
-  when (isJust maybeOpponentConn) $ 
-    WS.sendTextData (fromJust maybeOpponentConn) (msg :: ByteString)
+        Nothing -> liftIO $ modifyMVar_ mvarState $ \s -> do
+          let newState = addWaitingClient conn clientId s
+          putStrLn $ show newState
+          return newState
+    _ ->
+      let maybeOpponentConn = findMatchingConnection clientId state
+      in when (isJust maybeOpponentConn) $ 
+        WS.sendTextData (fromJust maybeOpponentConn) (msg :: ByteString)
 
 application :: MVar ServerState -> WS.PendingConnection -> IO ()
 application state pending = do
