@@ -6,7 +6,10 @@ import Control.Monad
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson
 import Data.Aeson.Types
-import Data.ByteString.Lazy.Internal
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as Char8
+import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Lazy.Internal as BSLI
 import Data.HashMap.Lazy
 import qualified Data.HashMap.Lazy as HM
 import Data.Maybe (isJust, fromJust)
@@ -40,7 +43,7 @@ newServerState = ServerState HM.empty HM.empty Nothing
 port :: Int
 port = 22000
 
-decodeMessage :: ByteString -> Message
+decodeMessage :: BSLI.ByteString -> Message
 decodeMessage msg =
   let d = eitherDecode msg :: Either String Message
   in
@@ -66,10 +69,10 @@ findMatchingConnection clientId (ServerState clients games waitingClient) =
 response :: WS.Connection -> ClientId -> MVar ServerState -> IO ()
 response conn clientId mvarState = forever $ do
   clientMsg <- WS.receiveData conn
-  state <- liftIO $ readMVar mvarState
-
+  let clientMsgText = T.pack $ Char8.unpack $ BS.concat $ BSL.toChunks clientMsg
   let message@(Message action) = decodeMessage clientMsg
-  putStrLn $ show message
+
+  state <- liftIO $ readMVar mvarState
 
   case action of
     "StartGame" ->
@@ -79,8 +82,11 @@ response conn clientId mvarState = forever $ do
           let newState@(ServerState clientMap _ _) = matchClients conn clientId s
           let opponentConn = clientMap ! opponentId
 
-          WS.sendTextData conn clientMsg
-          WS.sendTextData opponentConn clientMsg
+          -- Assign the current player and opponent the colors Red and Blue, respectively,
+          -- and pass on the StartGame messages.
+          -- TODO: do this through Aeson rather than this ridiculous find-and-replace approach
+          WS.sendTextData conn (T.replace "}" ", \"color\":\"red\"}" clientMsgText)
+          WS.sendTextData opponentConn (T.replace "}" ", \"color\":\"blue\"}" clientMsgText)
 
           putStrLn $ show newState
           return newState
@@ -92,7 +98,7 @@ response conn clientId mvarState = forever $ do
     _ ->
       let maybeOpponentConn = findMatchingConnection clientId state
       in when (isJust maybeOpponentConn) $ 
-        WS.sendTextData (fromJust maybeOpponentConn) (clientMsg :: ByteString)
+        WS.sendTextData (fromJust maybeOpponentConn) clientMsgText
 
 application :: MVar ServerState -> WS.PendingConnection -> IO ()
 application state pending = do
