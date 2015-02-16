@@ -13,7 +13,7 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Internal as BSLI
 import Data.HashMap.Lazy
 import qualified Data.HashMap.Lazy as HM
-import Data.Maybe (isJust, fromJust)
+import Data.Maybe (isJust, fromJust, mapMaybe)
 import qualified Data.Text as T
 import qualified Network.WebSockets as WS
 import System.Random
@@ -53,11 +53,11 @@ decodeMessage msg =
       Right action -> action
 
 addWaitingClient :: WS.Connection -> ClientId -> ServerState -> ServerState
-addWaitingClient conn clientId (ServerState clients games waitingClient) = 
+addWaitingClient conn clientId (ServerState clients games waitingClient) =
   ServerState (insert clientId conn clients) games (Just clientId)
 
 matchClients :: WS.Connection -> ClientId -> ServerState -> ServerState
-matchClients conn clientId (ServerState clients games (Just waitingClientId)) = 
+matchClients conn clientId (ServerState clients games (Just waitingClientId)) =
   let newGames = (insert waitingClientId clientId (insert clientId waitingClientId games))
   in
     ServerState (insert clientId conn clients) newGames Nothing
@@ -66,6 +66,13 @@ findMatchingConnection :: ClientId -> ServerState -> Maybe WS.Connection
 findMatchingConnection clientId (ServerState clients games waitingClient) =
   let otherClientId = HM.lookup clientId games
   in liftM (\cId -> clients ! cId) otherClientId
+
+removeClient :: ClientId -> ServerState -> ServerState
+removeClient clientId (ServerState clients games waitingClient) =
+  let newClients = HM.delete clientId clients
+      newGames = HM.filter (\oppId -> oppId /= clientId) $ HM.delete clientId games
+  in
+    ServerState newClients newGames (mfilter (/= clientId) waitingClient)
 
 response :: WS.Connection -> ClientId -> MVar ServerState -> IO ()
 response conn clientId mvarState = forever $ do
@@ -98,12 +105,24 @@ response conn clientId mvarState = forever $ do
           return newState
     _ ->
       let maybeOpponentConn = findMatchingConnection clientId state
-      in when (isJust maybeOpponentConn) $ 
+      in when (isJust maybeOpponentConn) $
         WS.sendTextData (fromJust maybeOpponentConn) clientMsgText
 
 
-exceptionHandler :: WS.ConnectionException  -> IO ()
-exceptionHandler e = putStrLn "Exception"
+handleDisconnect :: WS.Connection -> ClientId -> MVar ServerState -> WS.ConnectionException -> IO ()
+handleDisconnect conn clientId mvarState exception = do
+  putStrLn $ "Client disconnected: " ++ show clientId
+
+  state <- liftIO $ readMVar mvarState
+
+  let maybeOpponentConn = findMatchingConnection clientId state
+  when (isJust maybeOpponentConn) $
+    WS.sendTextData (fromJust maybeOpponentConn) ("{\"action\":\"OpponentDisconnected\"}" :: T.Text) -- TODO: do this through Aeson
+
+  liftIO $ modifyMVar_ mvarState $ \s -> do
+    let newState = removeClient clientId s
+    putStrLn $ show newState
+    return newState
 
 application :: MVar ServerState -> WS.PendingConnection -> IO ()
 application state pending = do
@@ -111,7 +130,8 @@ application state pending = do
   WS.forkPingThread conn 30    -- necessary to keep connection on some browsers
 
   clientId <- randomRIO (1, 100000000) :: IO Int
-  catch (response conn clientId state) exceptionHandler
+  putStrLn $ "Client connected: " ++ show clientId
+  catch (response conn clientId state) (handleDisconnect conn clientId state)
 
 main :: IO ()
 main = do
