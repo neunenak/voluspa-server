@@ -20,7 +20,7 @@ type ClientsMap = HashMap ClientId WS.Connection
 type GamesMap = HashMap ClientId ClientId   -- map of player to opponent (two entries per matchup). Maybe GamesMap is the wrong name for this?
 type WaitingClient = Maybe ClientId
 
-type ClientId = String
+type ClientId = Int
 
 data Action = 
   Action { action :: !T.Text }
@@ -100,8 +100,7 @@ application state pending = do
   conn <- WS.acceptRequest pending
   WS.forkPingThread conn 30    -- necessary to keep connection on some browsers
 
-  clientIdInt <- randomRIO (1, 100000000) :: IO Int
-  let clientId = show clientIdInt
+  clientId <- randomRIO (1, 100000000) :: IO Int
 
   response conn clientId state
 
