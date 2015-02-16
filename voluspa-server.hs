@@ -87,6 +87,8 @@ response conn clientId mvarState = forever $ do
     "StartGame" ->
       let ServerState _ _ waitingClient = state
       in case waitingClient of
+        Just id | id == clientId -> return ()  -- If we're already waiting for a game, continue waiting
+
         Just opponentId -> liftIO $ modifyMVar_ mvarState $ \s -> do
           let newState@(ServerState clientMap _ _) = matchClients conn clientId s
           let opponentConn = clientMap ! opponentId
