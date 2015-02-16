@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+import Control.Exception (catch)
 import Control.Applicative
 import Control.Concurrent (MVar, newMVar, modifyMVar_, modifyMVar, readMVar)
 import Control.Monad
@@ -94,14 +95,17 @@ response conn clientId mvarState = forever $ do
       in when (isJust maybeOpponentConn) $ 
         WS.sendTextData (fromJust maybeOpponentConn) (clientMsg :: ByteString)
 
+
+exceptionHandler :: WS.ConnectionException  -> IO ()
+exceptionHandler e = putStrLn "Exception"
+
 application :: MVar ServerState -> WS.PendingConnection -> IO ()
 application state pending = do
   conn <- WS.acceptRequest pending
   WS.forkPingThread conn 30    -- necessary to keep connection on some browsers
 
   clientId <- randomRIO (1, 100000000) :: IO Int
-
-  response conn clientId state
+  catch (response conn clientId state) exceptionHandler
 
 main :: IO ()
 main = do
