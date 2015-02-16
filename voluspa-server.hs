@@ -79,7 +79,7 @@ response conn clientId mvarState = forever $ do
   clientMsg <- WS.receiveData conn
   let clientMsgText = T.pack $ Char8.unpack $ BS.concat $ BSL.toChunks clientMsg
   let message@(Message action) = decodeMessage clientMsg
-  putStrLn (show clientMsgText)
+  putStrLn (show (clientId, clientMsgText))
 
   state <- liftIO $ readMVar mvarState
 
