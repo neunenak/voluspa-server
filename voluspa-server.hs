@@ -90,9 +90,16 @@ response conn clientId mvarState = forever $ do
   state <- liftIO $ readMVar mvarState
 
   case action of
-    "StartGame" ->
+    "StartGame" -> do
       let ServerState _ _ waitingClient = state
-      in case waitingClient of
+
+      -- If the client is currently in a game, let the opponent know that this client disconnected
+      -- TODO: this duplicates code from handleDisconnect - extract into a separate method?
+      let maybeOpponentConn = findMatchingConnection clientId state
+      when (isJust maybeOpponentConn) $
+        WS.sendTextData (fromJust maybeOpponentConn) ("{\"action\":\"OpponentDisconnected\"}" :: T.Text) -- TODO: do this through Aeson
+
+      case waitingClient of
         Just id | id == clientId -> return ()  -- If client is already waiting for a game, continue waiting
 
         Just opponentId -> liftIO $ modifyMVar_ mvarState $ \s -> do
