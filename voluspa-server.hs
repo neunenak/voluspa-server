@@ -53,12 +53,18 @@ decodeMessage msg =
       Right action -> action
 
 addWaitingClient :: WS.Connection -> ClientId -> ServerState -> ServerState
-addWaitingClient conn clientId (ServerState clients games waitingClient) =
-  ServerState (insert clientId conn clients) games (Just clientId)
+addWaitingClient conn clientId (ServerState clients games _) =
+  -- First remove any matchups the client is currently in, then set the client as the waiting client
+  let gamesWithClientRemoved = HM.filter (\oppId -> oppId /= clientId) $ HM.delete clientId games
+  in
+    ServerState (insert clientId conn clients) gamesWithClientRemoved (Just clientId)
 
 matchClients :: WS.Connection -> ClientId -> ServerState -> ServerState
 matchClients conn clientId (ServerState clients games (Just waitingClientId)) =
-  let newGames = (insert waitingClientId clientId (insert clientId waitingClientId games))
+  -- First remove any matchups the client is currently in, then create a new matchup
+  -- between the client and the waiting client
+  let gamesWithClientRemoved = HM.filter (\oppId -> oppId /= clientId) $ HM.delete clientId games
+      newGames = insert waitingClientId clientId $ insert clientId waitingClientId gamesWithClientRemoved
   in
     ServerState (insert clientId conn clients) newGames Nothing
 
@@ -69,10 +75,10 @@ findMatchingConnection clientId (ServerState clients games waitingClient) =
 
 removeClient :: ClientId -> ServerState -> ServerState
 removeClient clientId (ServerState clients games waitingClient) =
-  let newClients = HM.delete clientId clients
-      newGames = HM.filter (\oppId -> oppId /= clientId) $ HM.delete clientId games
+  let clientsWithClientRemoved = HM.delete clientId clients
+      gamesWithClientRemoved = HM.filter (\oppId -> oppId /= clientId) $ HM.delete clientId games
   in
-    ServerState newClients newGames (mfilter (/= clientId) waitingClient)
+    ServerState clientsWithClientRemoved gamesWithClientRemoved (mfilter (/= clientId) waitingClient)
 
 response :: WS.Connection -> ClientId -> MVar ServerState -> IO ()
 response conn clientId mvarState = forever $ do
@@ -87,7 +93,7 @@ response conn clientId mvarState = forever $ do
     "StartGame" ->
       let ServerState _ _ waitingClient = state
       in case waitingClient of
-        Just id | id == clientId -> return ()  -- If we're already waiting for a game, continue waiting
+        Just id | id == clientId -> return ()  -- If client is already waiting for a game, continue waiting
 
         Just opponentId -> liftIO $ modifyMVar_ mvarState $ \s -> do
           let newState@(ServerState clientMap _ _) = matchClients conn clientId s
